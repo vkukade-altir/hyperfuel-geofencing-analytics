@@ -1,11 +1,11 @@
 # Hyperfuel Geofencing Analytics Platform — Technical Specification
 
-**Version:** 1.1  
-**Status:** Approved design (v1) — senior review incorporated  
+**Version:** 1.2  
+**Status:** Approved design (v1) — ingest + analytics dashboard implemented  
 **Audience:** HF mobile engineers, backend engineers, analytics/web engineers  
-**Last updated:** 2026-06-24
+**Last updated:** 2026-06-30
 
-This document is the **source of truth** for the Hyperfuel geofencing analytics platform: a Python FastAPI + Supabase backend that receives location pings and optional OS geofence events from the HF mobile app, stores station/amenity geometry, computes ENTER/EXIT events server-side, and exposes data for future analytics dashboards.
+This document is the **source of truth** for the Hyperfuel geofencing analytics platform: a Python FastAPI + Supabase backend that receives location pings and optional OS geofence events from the HF mobile app, stores station/amenity geometry, computes ENTER/EXIT events server-side, and exposes data via the Visit Analytics web dashboard (`apps/web`).
 
 ---
 
@@ -18,7 +18,7 @@ This document is the **source of truth** for the Hyperfuel geofencing analytics 
 5. [API reference](#5-api-reference)
 6. [Entry/exit calculation logic](#6-entryexit-calculation-logic)
 7. [Supabase database schema](#7-supabase-database-schema)
-8. [Future web app and analytics APIs](#8-future-web-app-and-analytics-apis)
+8. [Web app and analytics APIs](#8-web-app-and-analytics-apis)
 9. [Operational notes (local dev)](#9-operational-notes-local-dev)
 10. [Glossary](#10-glossary)
 11. [Backend codebase structure](#11-backend-codebase-structure-implementation-guide)
@@ -68,7 +68,7 @@ The server:
 | App OS geofence events | **Optional** — stored but server validates via pings |
 | Auth (v1) | **None** — trust `user_id` from client; optional `device_id` for debug |
 | Deployment (v1) | **localhost** on same machine as HF app dev build |
-| Web dashboard | **Out of scope for v1** — APIs stubbed/planned in Section 8 |
+| Web dashboard | **Implemented** — `apps/web` Visit Analytics SPA; read APIs in Section 8 |
 
 ### 1.4 Related systems
 
@@ -102,7 +102,7 @@ The server:
 - Redis, PostGIS requirement (simple haversine distance for circles is sufficient v1).
 - Polygon amenities (optional column exists; v1 may use circles only).
 - Production deployment, RLS policies, data retention automation.
-- Web analytics UI (planned in Section 8).
+- Admin auth on analytics APIs (dashboard is internal-only, no login yet — Section 8.7).
 - Replacing HF CORE API as catalog source long-term (app forwards data for now).
 
 ---
@@ -1610,9 +1610,9 @@ DEFAULT_STATION_RADIUS_METERS=70
 
 ---
 
-## 8. Future web app and analytics APIs
+## 8. Web app and analytics APIs
 
-The v1 backend is **ingest-only** for mobile. This section describes the planned **analytics web application** (monorepo `apps/web`) and read APIs for leadership dashboards, ops observability, and engineering debug.
+The backend serves **mobile ingest** (Section 5) and **read-only analytics APIs** for the Visit Analytics dashboard (`apps/web`). Section 8.3–8.4 mark what is **implemented** vs still **planned**.
 
 ### 8.1 Web app purpose
 
@@ -1625,36 +1625,49 @@ The v1 backend is **ingest-only** for mobile. This section describes the planned
 
 **Scope:** Observability limited to geofencing feature — not full app analytics.
 
-### 8.2 Planned monorepo structure
+### 8.2 Monorepo structure
 
 ```
 hyperfuel-geofencing-analytics/
 ├── apps/
-│   ├── api/          # FastAPI (v1 ingest + v2 analytics routes)
-│   └── web/          # React SPA (future)
-├── packages/
-│   └── shared-types/ # Optional shared TS types for API contracts
-└── docs/
-    └── geofencing-analytics-platform-spec.md  # this document (or copy)
+│   ├── api/          # FastAPI — ingest + analytics read routes
+│   └── web/          # React Visit Analytics dashboard (implemented)
+├── docs/
+│   └── geofencing-analytics-platform-spec.md
+└── package.json      # npm run dev — API :8000 + web :5173
 ```
 
-Web stack (suggested, not finalized): React + Vite, same as operative-ai `apps/web`. Charts: Recharts or similar. Auth: simple admin API key or Supabase Auth for internal users only.
+Web stack: React 18 + TypeScript + Vite, Material UI, TanStack Query. Auth: not implemented — internal dev use only (Section 8.7).
 
-### 8.3 Web app pages (planned)
+### 8.3 Web app pages
 
-| Page | Description |
-|------|-------------|
-| **Dashboard** | KPI cards: total pings today, active users, station visits, amenity visits |
-| **Stations** | Table of stations ranked by unique visitors, visit count, avg dwell |
-| **Station detail** | Timeline chart visits/hour; amenity breakdown; top users |
-| **Amenities** | Ranked list by foot traffic and dwell; filter by station |
-| **User timeline** | Search by `user_id` — pings map + ENTER/EXIT timeline + raw OS events |
-| **Observability** | Permission snapshot stats, ping gaps, duplicate rate, platform breakdown |
-| **Entity admin** | CRUD stations/amenities (may overlap with ingest from app in dev) |
+| Page | Route | Status | Description |
+|------|-------|--------|-------------|
+| **Stations** | `/stations` | Implemented | Home — stations ranked by visitors, visits, time spent; expandable amenity rows |
+| **Place report** | `/entities/:entityId` | Implemented | Per-station or per-amenity KPIs and visitor breakdown |
+| **Users** | `/users` | Implemented | User list with KPI cards (location updates, visits, still there) |
+| **User drill-down** | `/users/:userId` | Implemented | Visits, location updates, tracked places; technical detail drawer |
+| **Dashboard (standalone)** | — | Planned | Dedicated KPI home separate from nav sections |
+| **Observability** | — | Planned | Permission stats, ping gaps, duplicate rate, platform breakdown |
+| **Entity admin** | — | Planned | CRUD stations/amenities (dev; ingest from app is primary) |
 
-### 8.4 Planned analytics APIs (v2)
+### 8.4 Analytics APIs
 
-All under `/api/v1/analytics`, read-only, **admin auth required** (not implemented v1).
+All under `/api/v1/analytics`, read-only. **Admin auth not implemented** — same as mobile ingest (Section 8.7).
+
+#### Implemented (v1 dashboard)
+
+| Method | Path | Used by |
+|--------|------|---------|
+| GET | `/dashboard/summary` | KPI cards (`from`, `to` optional) |
+| GET | `/users` | Users page |
+| GET | `/users/{user_id}/timeline` | User drill-down |
+| GET | `/entities` | Entity lists in user timeline |
+| GET | `/presence-sessions` | Session data (filters: `user_id`, `entity_id`, `from`, `to`, `open_only`) |
+| GET | `/stations/catalog` | Stations home |
+| GET | `/entities/{entity_id}/analytics` | Place report |
+
+#### Planned (not yet implemented)
 
 #### `GET /api/v1/analytics/dashboard/summary`
 
@@ -1803,15 +1816,18 @@ Data retention policy (future): raw pings may be aggregated after 90 days; `geo_
 ### 9.1 Starting the stack
 
 ```bash
-# 1. Supabase: create tables (Section 7.8 SQL)
+# 1. Supabase: apply migrations in apps/api/migrations/ (or Section 7.8 SQL)
 
-# 2. Backend
+# 2. Full stack (API + Visit Analytics dashboard)
 cd apps/api
-cp .env.example .env   # fill SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY
-pip install -e .
-uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
+python -m venv .venv && source .venv/bin/activate
+cp .env.example .env   # fill SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY; USE_MEMORY_STORE=false for real data
+pip install -e ".[dev]"
+cd ../web && yarn install
+cd ../.. && npm install
+npm run dev            # API :8000, dashboard :5173
 
-# 3. HF app
+# 3. HF app (optional — mobile ingest)
 # Set GEOFENCE_ANALYTICS_BASE_URL per Section 4.2
 npm start / yarn ios / yarn android
 ```
@@ -1898,6 +1914,7 @@ Check Supabase: `location_pings`, `geo_events` (ENTER if inside 70m), `user_geo_
 |---------|------|---------|
 | 1.0 | 2026-06-24 | Initial complete spec: ingest API, set-diff logic, Supabase schema, HF integration, future web |
 | 1.1 | 2026-06-24 | Senior review: fixed bootstrap SQL indexes, Android `__DEV__` base URL, algorithm gaps (`source_ping_id`, `station_id`, `presence_sessions`), entity upsert ordering, HTTP 422 convention, health path note, v1 limitations table |
+| 1.2 | 2026-06-30 | Visit Analytics dashboard (`apps/web`) and analytics read APIs implemented; Section 8 and codebase structure updated |
 
 ---
 
@@ -1919,7 +1936,9 @@ Server per ping:
 Tables: entities, location_pings, geofence_events_raw,
         geo_events, user_geo_state, presence_sessions
 
-Local URL: http://localhost:8000 (see Section 4.2 for emulator/device)
+Local API: http://localhost:8000 (see Section 4.2 for emulator/device)
+Dashboard: http://localhost:5173 (npm run dev from repo root)
+Analytics: GET /api/v1/analytics/*
 ```
 
 ---
@@ -1932,44 +1951,51 @@ Follow **operative-ai-main** layered architecture. Engineers implementing the on
 apps/api/
 ├── app/
 │   ├── main.py                 # FastAPI app, CORS, lifespan, router registration
-│   ├── config.py               # Settings: SUPABASE_*, DEFAULT_STATION_RADIUS_METERS=70
-│   ├── dependencies.py         # get_admin_client, get_*_repository, get_*_service
+│   ├── config.py               # Settings: SUPABASE_*, USE_MEMORY_STORE, DEFAULT_STATION_RADIUS_METERS=70
+│   ├── dependencies.py         # get_admin_client, get_*_service
 │   ├── api/v1/routes/
 │   │   ├── health.py           # GET /api/health
 │   │   ├── ingest.py           # POST /api/v1/ingest
-│   │   └── geofence_config.py  # GET /api/v1/geofence-config (optional)
+│   │   ├── geofence_config.py  # GET /api/v1/geofence-config
+│   │   └── analytics.py        # GET /api/v1/analytics/* (Section 8.4)
 │   ├── services/
 │   │   ├── ingest_service.py   # Orchestrates upsert + ping loop + response
 │   │   ├── geofence_engine.py  # Section 6.4 pseudocode — CORE LOGIC
 │   │   ├── entity_service.py   # Upsert entities, build geofence_config
-│   │   └── session_service.py  # Open/close presence_sessions on geo_events
+│   │   ├── session_service.py  # Open/close presence_sessions on geo_events
+│   │   ├── analytics_service.py
+│   │   └── entity_analytics_service.py
 │   ├── repositories/
-│   │   ├── entity_repository.py
-│   │   ├── ping_repository.py
-│   │   ├── geo_event_repository.py
-│   │   ├── raw_event_repository.py
-│   │   ├── user_geo_state_repository.py
-│   │   └── session_repository.py
+│   │   ├── memory_backend.py   # In-memory store when USE_MEMORY_STORE=true
+│   │   └── supabase_backend.py # Supabase persistence
 │   ├── schemas/
-│   │   ├── requests/
-│   │   │   └── ingest_request.py   # Pydantic models for full POST body
-│   │   ├── responses/
-│   │   │   └── ingest_response.py
-│   │   └── internal/
-│   │       └── entity.py
+│   │   ├── requests/ingest_request.py
+│   │   ├── responses/          # api_response, ingest, analytics, entity_analytics
+│   │   └── internal/models.py
 │   └── core/
-│       ├── supabase.py         # Async admin client (operative-ai pattern)
+│       ├── supabase.py         # Async admin client
+│       ├── supabase_retry.py
+│       ├── postgrest_errors.py
 │       ├── geo.py              # haversine_distance_meters(), is_inside_circle()
 │       ├── exceptions.py
 │       ├── error_handlers.py
 │       └── responses.py        # success(), error() helpers
 ├── migrations/
-│   └── 20260624120000_initial_schema.sql   # Copy from Section 7.8
+│   ├── 20260624120000_initial_schema.sql
+│   ├── 20260625143000_entities_user_id.sql
+│   └── 20260625200000_geo_users.sql
 ├── tests/
 │   ├── test_geofence_engine.py # Section 6.7, 6.8, 6.9 as pytest cases
-│   └── test_ingest_api.py
+│   ├── test_geo.py
+│   ├── test_ingest_api.py
+│   ├── test_analytics_api.py
+│   ├── test_entity_analytics_api.py
+│   ├── test_supabase_idempotency.py
+│   └── test_supabase_retry.py
 ├── pyproject.toml
 └── .env.example
+
+apps/web/                       # Visit Analytics dashboard — see apps/web/README.md
 ```
 
 ### 11.1 Key implementation files
@@ -2000,6 +2026,8 @@ allow_origins=[
     "http://localhost:8081",
     "http://localhost:19006",
     "http://127.0.0.1:8081",
+    "http://localhost:5173",
+    "http://127.0.0.1:5173",
 ]
 ```
 
