@@ -1,0 +1,10 @@
+apps/api/.venv/
+apps/api/.env
+node_modules/
+apps/web/node_modules/
+apps/web/dist/
+__pycache__/
+*.pyc
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/

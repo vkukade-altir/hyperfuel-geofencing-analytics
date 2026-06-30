@@ -1,0 +1,22 @@
+import { SvgIcon, type SvgIconProps } from '@mui/material';
+
+export const UserCheck = (props: SvgIconProps) => {
+  return (
+    <SvgIcon
+      xmlns="http://www.w3.org/2000/svg"
+      width="24"
+      height="24"
+      viewBox="0 0 24 24"
+      fill="none"
+      {...props}
+    >
+      <path
+        d="M17 10L19 12L23 8M13 6C13 8.20914 11.2091 10 9 10C6.79086 10 5 8.20914 5 6C5 3.79086 6.79086 2 9 2C11.2091 2 13 3.79086 13 6ZM5.2 22H12.8C14.5673 22 16 20.5673 16 18.8C16 16.149 13.851 14 11.2 14H6.8C4.14903 14 2 16.149 2 18.8C2 20.5673 3.43269 22 5.2 22Z"
+        stroke="currentColor"
+        strokeWidth="1.5"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+    </SvgIcon>
+  );
+};

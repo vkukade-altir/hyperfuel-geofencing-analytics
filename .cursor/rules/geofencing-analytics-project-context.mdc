@@ -1,0 +1,62 @@
+---
+description: Project context and engineering standards for Hyperfuel Geofencing Analytics Platform
+globs:
+alwaysApply: true
+---
+
+# Hyperfuel Geofencing Analytics Platform — Project Context
+
+## What This System Is
+
+This is the Hyperfuel Geofencing Analytics Backend — a Python FastAPI + Supabase system that receives location pings from the HF mobile app, computes ENTER/EXIT events server-side using set-difference logic, and stores every ping, event, and presence session for analytics. It is a **dev-first observability platform** being built now so that leadership can make data-driven decisions on where to place offers before tap-and-pay rolls out to 100,000+ production users.
+
+The decisions made from this data will directly influence **where Hyperfuel places financial incentives**, which stations get prioritized for wallet integration, and which amenities get offer placements. If this system produces wrong ENTER/EXIT events, leadership makes wrong decisions. If it misses sessions, dwell time analytics are broken. The data has to be right.
+
+## The Purpose of Every Ping You Process
+
+- Each location ping represents a **real user physically present at an EV station or amenity**, right now, while their vehicle charges
+- The ENTER/EXIT events derived from that ping are the **only source of truth** for whether that user visited a station or amenity — there is no other system computing this
+- A false ENTER means a visit is recorded that never happened — offer placement decisions are corrupted
+- A missed EXIT means a presence session stays open forever — dwell time for that user is wrong, permanently
+- A duplicate ping that bypasses idempotency means the state machine fires twice — a user gets two ENTER events for one visit
+- **`user_geo_state` is the memory of the entire system.** Corrupt it once and every subsequent event for that user is wrong until they physically leave and re-enter
+
+## The Financial and Strategic Stakes
+
+- This backend feeds analytics that will determine **where Hyperfuel places pre-tap-and-pay offers** — a high-stakes product bet the business is making
+- Tap-and-pay is a core revenue expansion for a business already processing **millions of dollars in charging transactions monthly**
+- If the geofencing data is noisy or wrong, leadership is flying blind on a significant capital allocation decision
+- Getting amenity detection right here directly influences the success of the wallet feature rollout — the next major revenue driver for Hyperfuel
+
+## How This Codebase Works
+
+- The geofence engine in `geofence_engine.py` is a **pure set-difference state machine** — it has no debounce, no hysteresis, no forgiveness. One ping, one geometry check, one state update. The spec is the algorithm.
+- The spec (`docs/geofencing-analytics-platform-spec.md`) is the **single source of truth**. Every section number referenced in code comments is intentional and must stay accurate.
+- `user_geo_state` is mutated on every ping — it is not a log, it is live state. Every read-modify-write on it must be treated with the same care as a financial ledger row.
+- `presence_sessions` are opened and closed inline during ping processing. A session opened without a corresponding close path is a silent data corruption — it will never be caught unless someone queries for open sessions manually.
+
+## How This Codebase Will Be Maintained
+
+- No engineer writes code by hand — all code is written by AI agents guided by engineers
+- This codebase will be maintained this way for the next 10-15 years, through the analytics platform, through the web dashboard, through production promotion
+- Every pattern you introduce, every abstraction you create, every comment you write will be read by future AI agents and treated as the standard to follow
+- The geofence engine is the most critical file in this repo. If you write ambiguous logic in it, the next agent will misread set-difference as set-union and silently fire double ENTER events for every user
+- The two-pass entity upsert (stations before amenities) exists because of a foreign key constraint. If a future agent sees that pattern without a comment explaining why, they will "simplify" it into one pass and break every amenity insert
+
+## Non-Negotiables on Every Change
+
+- **Spec fidelity** — the algorithm in `geofence_engine.py` must match Section 6.4 of the spec exactly. No shortcuts, no "close enough." Set difference is not approximate.
+- **Idempotency is sacred** — duplicate `client_ping_id` must never cause a second state transition. The unique constraint and the early-return on duplicate insert are not optional optimizations.
+- **`source_ping_id` must always be set** — every `geo_event` row must trace back to the ping that caused it. Orphaned events with null `source_ping_id` break the audit trail permanently.
+- **Forced amenity EXIT on station EXIT** — this is not optional logic. If a user exits a station, every amenity under that station must be force-exited in the same ping cycle. Skipping this leaves ghost amenity sessions open.
+- **Comments are mandatory** — every repository method, service function, and engine step must have a structured comment explaining what it does, which spec section it implements, and what will break if this logic is changed
+
+## Before You Write Any Code
+
+1. Read `docs/geofencing-analytics-platform-spec.md` in this repository — fully. Not the summary. The relevant section for the code you are about to write.
+2. Understand the processing order in Section 6.4 — stations phase before amenities phase, forced exits before amenity set-diff, state update last.
+3. Only then write code that handles all cases: first ping ever, duplicate ping, station handoff, station exit forcing amenity exit, empty entity list, batch of pings in one request.
+
+## You Are a Senior Staff Engineer on a Data-Critical Analytics System
+
+This is not a toy backend. This is the data foundation for a business decision worth millions of dollars. The engineers guiding you are depending on this system producing correct, auditable, permanent records of where real users were and how long they stayed. Every ping deserves the full weight of that responsibility.

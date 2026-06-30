@@ -1,0 +1,63 @@
+---
+description: Human-first UI for Geofencing Analytics — leadership decisions before engineering jargon
+alwaysApply: true
+---
+
+# Human experience before technology
+
+## The product lens
+
+This is the **Hyperfuel Geofencing Analytics dashboard**. It has two audiences — never mix their primary paths:
+
+- **Leadership & product** — decide where to place offers, which stations and amenities get traffic, how long people stay. They need plain language, clear numbers, and answers to: _Who visited? How often? How long? Are they still there?_
+- **Engineers** — debug ping processing, ENTER/EXIT correctness, open sessions, idempotency. They need the same data with IDs, source pings, and raw payloads — but **behind** the human view, not in the way.
+
+Default to the leadership path. Technical detail is collapsible or in drill-down drawers, never the first thing on screen.
+
+## Before writing or changing any UI, ask:
+
+> _Who is reading this screen, and what decision are they trying to make — not what database field am I exposing?_
+
+If unclear, name the audience before proceeding.
+
+## Language rules (non-negotiable in UI copy)
+
+| Avoid (engineering)                | Use (human)                                   |
+| ---------------------------------- | --------------------------------------------- |
+| ENTER / EXIT                       | Arrived / Left                                |
+| Ping                               | Location update                               |
+| Geo event                          | Visit recorded                                |
+| Entity                             | Place (station or amenity)                    |
+| Dwell                              | Time spent                                    |
+| Session                            | Visit                                         |
+| Open session                       | Still there                                   |
+| Unique visitors                    | People who visited                            |
+| Source ping ID                     | (hide in main view; put in Technical details) |
+| client_ping_id, entity_id, user_id | (hide in tables; show name/email instead)     |
+| UTC timestamps                     | Show in **browser local timezone** always     |
+
+Dates: backend stores UTC. UI **always** converts to the viewer's local timezone. Never show raw ISO strings in tables or cards.
+
+## Anti-patterns to catch and flag
+
+- **Schema-first UI** — column headers that mirror database fields (`source_ping_id`, `geometry_type`, `client_ping_id`)
+- **Jargon on the happy path** — ENTER, EXIT, dwell, entity, ping, session in headings, KPIs, or nav without plain-language labels
+- **IDs as primary identifiers** — monospace IDs where a name, email, or place name exists
+- **One audience fits all** — dumping JSON, UUIDs, and coordinates on leadership views
+- **Debug-first layout** — building the engineer drawer before the leadership summary works
+- **UTC displayed as-is** — timestamps without local conversion
+- **Dead-end numbers** — KPIs with no context (what does "42 ENTERs" mean to a PM?)
+
+## Layout priorities
+
+1. **Stations** — foot traffic and time spent per station/amenity (leadership home for offer placement)
+2. **Users** — who is in the app, where they are now, their visit history
+3. **Technical details** — collapsible sections, detail drawers, never the default table columns
+
+## When flagging a weak proposal
+
+1. Name whose experience breaks in one sentence
+2. Suggest the plain-language path
+3. Don't block — offer to proceed with the fix or note the tradeoff
+
+Don't lecture. Flag once, suggest once, move.
