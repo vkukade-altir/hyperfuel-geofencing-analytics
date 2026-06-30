@@ -4,8 +4,10 @@ from collections.abc import Awaitable, Callable
 from datetime import datetime
 from typing import Any, TypeVar
 
+from postgrest.exceptions import APIError
 from supabase import AsyncClient
 
+from app.core.postgrest_errors import is_unique_violation
 from app.core.supabase import first_row_or_none
 from app.core.supabase_retry import with_supabase_retry
 from app.repositories.memory_backend import MemoryBackend
@@ -143,10 +145,16 @@ class SupabaseBackend(MemoryBackend):
             "ping_reason": kwargs.get("ping_reason"),
             "context": kwargs.get("context"),
         }
-        response = await self._run(
-            lambda: self._client.table("location_pings").insert(row).select("*").execute(),
-            operation="insert_location_ping",
-        )
+        try:
+            response = await self._run(
+                lambda: self._client.table("location_pings").insert(row).select("*").execute(),
+                operation="insert_location_ping",
+            )
+        except APIError as exc:
+            # Concurrent duplicate ingest: unique (user_id, client_ping_id) wins over check-then-insert.
+            if is_unique_violation(exc):
+                return None
+            raise
         inserted = first_row_or_none(response)
         if not inserted:
             return None
@@ -183,10 +191,15 @@ class SupabaseBackend(MemoryBackend):
             "coordinates_adjusted": kwargs.get("coordinates_adjusted", False),
             "extras": kwargs.get("extras"),
         }
-        await self._run(
-            lambda: self._client.table("geofence_events_raw").insert(row).execute(),
-            operation="insert_geofence_event_raw",
-        )
+        try:
+            await self._run(
+                lambda: self._client.table("geofence_events_raw").insert(row).execute(),
+                operation="insert_geofence_event_raw",
+            )
+        except APIError as exc:
+            if is_unique_violation(exc):
+                return False
+            raise
         return True
 
     async def create_geo_event(self, **kwargs: Any) -> GeoEventRecord:
@@ -230,10 +243,24 @@ class SupabaseBackend(MemoryBackend):
             "inside_station_ids": [],
             "inside_amenity_ids": [],
         }
-        await self._run(
-            lambda: self._client.table("user_geo_state").insert(row).execute(),
-            operation="insert_user_geo_state",
-        )
+        try:
+            await self._run(
+                lambda: self._client.table("user_geo_state").insert(row).execute(),
+                operation="insert_user_geo_state",
+            )
+        except APIError as exc:
+            if is_unique_violation(exc):
+                response = await self._run(
+                    lambda: self._client.table("user_geo_state")
+                    .select("*")
+                    .eq("user_id", user_id)
+                    .maybe_single()
+                    .execute(),
+                    operation="get_user_geo_state_after_race",
+                )
+                if response and response.data:
+                    return UserGeoStateRecord.model_validate(response.data)
+            raise
         return UserGeoStateRecord(
             user_id=user_id,
             inside_station_ids=[],
